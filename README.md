@@ -87,7 +87,7 @@ Every push to `main` runs `.github/workflows/deploy.yaml`, which installs,
 lints, builds, tests, and publishes your site to GitHub Pages at:
 
 ```
-https://<ORG>.github.io/<REPO>/
+https://juanblud.github.io/localrepojuan/
 ```
 
 Alongside the site it publishes a **dashboard** with the results of every
@@ -95,7 +95,7 @@ step, a GitInspector report of who contributed what, and your recent commit
 messages:
 
 ```
-https://<ORG>.github.io/<REPO>/dashboard.html
+https://juanblud.github.io/localrepojuan/dashboard.html
 ```
 
 If lint, build, or tests fail, the dashboard still deploys and shows the error
@@ -104,6 +104,18 @@ confirm with `npm run lint` and `npm run test:ci`, and push again.
 
 The first time, a repository admin must enable Pages: **Settings > Pages >
 Source: GitHub Actions**.
+
+For this repository, open
+[Pages settings](https://github.com/juanblud/localrepojuan/settings/pages)
+and select **GitHub Actions** as the source. Commit and push your changes to
+`main`, then check the
+[deployment workflow](https://github.com/juanblud/localrepojuan/actions/workflows/deploy.yaml).
+You can also use **Run workflow** there to deploy the current `main` branch.
+
+Vite's `base` is set to `/localrepojuan/` so production assets load from the
+repository's Pages URL. Update it if you rename the repository or use a custom
+domain. To check a production build locally, run `npm run build` followed by
+`npm run preview` and open the URL it prints.
 
 Pull requests run `.github/workflows/ci.yaml`, which does the same lint, build,
 and test steps without deploying, so problems are visible before merging.
