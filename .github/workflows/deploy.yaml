@@ -1,0 +1,300 @@
+# Deploys the main branch to GitHub Pages along with a "dashboard" of helpful
+# build information (lint results, test results, commit history, etc.).
+#
+# Every step records what happened in dist/_build_log.txt. Install, lint,
+# build, and test failures are also written to dist/_ERRORS.txt; anything in
+# that file is shown at the top of the dashboard, and the final step marks the
+# run as failed so the red X shows up on the commit.
+
+name: Deploy main branch as website
+
+on:
+    push:
+        branches: [main]
+    workflow_dispatch:
+
+# Required permissions for Pages v4 + artifact v4
+permissions:
+    actions: read
+    contents: read
+    pages: write
+    id-token: write
+
+# Only one concurrent deployment
+concurrency:
+    group: "pages"
+    cancel-in-progress: false
+
+jobs:
+    deploy:
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+
+        # Recommended for Pages so the URL shows on the run summary
+        environment:
+            name: github-pages
+            url: ${{ steps.deployment.outputs.page_url }}
+
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v5
+              with:
+                  # Full history is needed for the GitInspector report
+                  fetch-depth: 0
+
+            - name: Use Node.js 22
+              uses: actions/setup-node@v5
+              with:
+                  node-version: 22
+                  cache: "npm"
+
+            - id: get-repo-values
+              name: Get repository values
+              run: |
+                  url=https://$(echo "${{ github.repository }}" | sed "s/\//.github.io\//")
+                  echo "url=$url" >> $GITHUB_OUTPUT
+
+            - id: compute-base
+              name: Compute base path
+              run: |
+                  repo="${GITHUB_REPOSITORY#*/}"   # owner/repo -> repo
+                  echo "base=/$repo/" >> $GITHUB_OUTPUT
+
+            # Create the dist/ directory and the files that track errors and warnings
+            - name: Create dist directory and status files
+              run: |
+                  mkdir -p dist
+                  touch ./dist/_ERRORS.txt
+                  touch ./dist/_WARNINGS.txt
+
+            # Keep track of the build process in a log file that we eventually dump
+            - name: Create Log File
+              id: create_log
+              run: |
+                  echo "Starting deployment at $(date)" |& tee ./dist/_build_log.txt
+                  echo "Repository: ${{ github.repository }}" |& tee -a ./dist/_build_log.txt
+                  echo "Run ID: ${{ github.run_id }}" |& tee -a ./dist/_build_log.txt
+                  echo "Job: ${{ github.job }}" |& tee -a ./dist/_build_log.txt
+                  echo "Full log available at:" |& tee -a ./dist/_build_log.txt
+                  : # https://stackoverflow.com/a/76681922/1718155
+                  echo "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" |& tee -a ./dist/_build_log.txt
+                  echo "" >> ./dist/_build_log.txt
+
+            # Create the dashboard, for quick links and debug information
+            - name: Setup Dashboard
+              id: setup_dashboard
+              run: |
+                  mkdir -p docs
+                  printf '## Quick Links\n\nHere are quick links for your deployed site! The build log is at the bottom.\n\n' > docs/dashboard.md
+
+                  : # Create a redirect to the dashboard from quick/ and dashboard/
+                  echo "<html><head>\
+                  <meta http-equiv='refresh' content='0; URL=docs/dashboard' />\
+                  </head><body>Redirecting to dashboard</body></html>" > ./dist/dashboard.html
+                  cp ./dist/dashboard.html ./dist/quick.html
+
+                  : # Add a link to the deployed site and this dashboard
+                  echo "* [Deployed Site](../): Your actual website." >> docs/dashboard.md
+                  echo "* [Dashboard](./dashboard.html): This current page." >> docs/dashboard.md
+                  echo "* [Deployment Log](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}): The official deployment logs on GitHub, with full details on any deployment issues." >> docs/dashboard.md
+
+                  printf 'Successfully created dashboard file\n' >> ./dist/_build_log.txt
+
+            # create_redirects
+            - name: Create Redirects and Links
+              id: create_redirects
+              run: |
+                  : # Create a redirect to the github repository
+                  echo "<html><head>\
+                  <meta http-equiv='refresh' content='0; URL=${{github.server_url}}/${{github.repository}}' />\
+                  </head><body>Redirecting to repository</body></html>" > ./dist/repo.html
+
+                  : # Add the redirect to the dashboard
+                  echo "* [GitHub Repository](../repo.html): Jump to the GitHub repository with your source code." >> docs/dashboard.md
+
+                  printf 'Successfully created redirect to repository\n' >> ./dist/_build_log.txt
+
+            # Install node packages
+            - name: Install
+              id: install
+              run: |
+                  echo "<html><body><pre>" > ./dist/installation.html
+                  if npm ci |& tee -a ./dist/installation.html; then
+                      printf 'Successfully installed dependencies\n' >> ./dist/_build_log.txt
+                  else
+                      printf 'INSTALL FAILED. Usually this means package.json and package-lock.json disagree; run `npm install` locally and commit the updated lock file.\n' >> ./dist/_ERRORS.txt
+                      printf 'ERROR: npm ci failed\n' >> ./dist/_build_log.txt
+                  fi
+                  echo "</pre></body></html>" >> ./dist/installation.html
+                  echo '* [Installation](../installation.html): Installation details from when we deployed your website.' >> docs/dashboard.md
+
+            # Run linter (eslint-output writes dist/lint.html via eslintoutput.config.js)
+            - name: Run Linter
+              id: lint
+              if: ${{ !cancelled() }}
+              run: |
+                  if npm run eslint-output |& tee -a ./dist/_build_log.txt; then
+                      echo "* [Linter](../lint.html): No lint errors or warnings." >> docs/dashboard.md
+                      printf 'Successfully ran linter\n' >> ./dist/_build_log.txt
+                  else
+                      echo "* [Linter](../lint.html): **LINT FAILED.** Open the report for details." >> docs/dashboard.md
+                      printf 'LINT FAILED. Run `npm run lint` locally and fix every error and warning before pushing. The full report is linked from the Linter entry below.\n' >> ./dist/_ERRORS.txt
+                      printf 'ERROR: linter failed\n' >> ./dist/_build_log.txt
+                  fi
+
+            # Build the project. --no-emptyOutDir matters: by default Vite wipes
+            # dist/ before building, which would delete the dashboard files and
+            # logs the earlier steps already wrote there.
+            - name: Build the project
+              id: build
+              if: ${{ !cancelled() }}
+              run: |
+                  echo "<html><body><pre>" > ./dist/build.html
+                  if npm run build -- --base "${{ steps.compute-base.outputs.base }}" --no-emptyOutDir |& tee -a ./dist/build.html; then
+                      echo "* [Build](../build.html): Build succeeded." >> docs/dashboard.md
+                      printf 'Successfully built the project\n' >> ./dist/_build_log.txt
+                  else
+                      echo "* [Build](../build.html): **BUILD FAILED.** Open the log for details." >> docs/dashboard.md
+                      printf 'BUILD FAILED. Your site was not deployed. Run `npm run build` locally; TypeScript errors are the usual cause.\n' >> ./dist/_ERRORS.txt
+                      printf 'ERROR: build failed\n' >> ./dist/_build_log.txt
+                  fi
+                  echo "</pre></body></html>" >> ./dist/build.html
+
+            # Run Tests
+            - name: Run Tests
+              id: test
+              if: ${{ !cancelled() }}
+              run: |
+                  echo "<html><body><pre>" > ./dist/tests.html
+                  if npm run test:cov |& tee -a ./dist/tests.html; then
+                      echo "* [Tests](../tests.html): All tests passed." >> docs/dashboard.md
+                      printf 'Successfully ran tests\n' >> ./dist/_build_log.txt
+                  else
+                      echo "* [Tests](../tests.html): **TESTS FAILED.** Open the log for details." >> docs/dashboard.md
+                      printf 'TESTS FAILED (or no tests were found). Run `npm run test:ci` locally to see which tests fail.\n' >> ./dist/_ERRORS.txt
+                      printf 'ERROR: tests failed\n' >> ./dist/_build_log.txt
+                  fi
+                  echo "</pre></body></html>" >> ./dist/tests.html
+
+            # Verify Integrity: record checksums of the tooling configuration and
+            # the test files, so instructors can confirm the lint/test setup has
+            # not been weakened and can see which tests exist.
+            - name: Verify Integrity
+              if: ${{ !cancelled() }}
+              id: integrity
+              run: |
+                  echo "<html><body><pre>" > ./dist/integrity.html
+                  echo "== Tooling configuration ==" >> ./dist/integrity.html
+                  md5sum package.json eslint.config.js eslintoutput.config.js .prettierrc jest.config.js tsconfig.json tsconfig.app.json tsconfig.node.json vite.config.ts tests/setupTests.ts .github/workflows/deploy.yaml .github/workflows/ci.yaml >> ./dist/integrity.html 2>&1 || true
+                  echo "" >> ./dist/integrity.html
+                  echo "== Test files ==" >> ./dist/integrity.html
+                  find tests -type f \( -name "*.spec.ts" -o -name "*.spec.tsx" \) -exec md5sum {} + >> ./dist/integrity.html
+                  echo "</pre></body></html>" >> ./dist/integrity.html
+                  echo "* [Integrity](../integrity.html): Checksums of the tooling configuration and a list of your test files." >> docs/dashboard.md
+
+                  printf 'Successfully verified integrity\n' >> ./dist/_build_log.txt
+
+            # Create GitInspector Report
+            - name: Create GitInspector Report
+              if: ${{ !cancelled() }}
+              id: gitinspector
+              run: |
+                  git clone --depth 1 https://github.com/jpwhite3/gitinspector.git
+                  python3 ./gitinspector/gitinspector.py ./ --grading --format=html -f tsx,ts,html,css -x ./gitinspector -x ./node_modules > ./dist/git.html
+                  echo "* [Git Inspector](../git.html): Who contributed what, according to the git history." >> docs/dashboard.md
+
+                  printf 'Successfully created GitInspector report\n' >> ./dist/_build_log.txt
+
+            # Copy commit logs with messages
+            - name: Copy commit logs with messages
+              if: ${{ !cancelled() }}
+              id: commit_logs
+              run: |
+                  echo "<html><body><pre>" > ./dist/commits.html
+                  echo "Last 50 commits with messages:" >> ./dist/_build_log.txt
+                  git log --oneline --decorate --graph --all -n 50 | tee -a ./dist/commits.html ./dist/_build_log.txt
+                  echo "</pre></body></html>" >> ./dist/commits.html
+                  echo '* [Commit Messages](../commits.html): The last 50 commit messages logged for this repository. Make sure you are writing good commit messages!' >> docs/dashboard.md
+
+                  printf 'Successfully copied commit logs with messages\n' >> ./dist/_build_log.txt
+
+            # If there were errors or warnings, then prepend them to the dashboard
+            - name: Show errors and warnings in dashboard
+              id: show_errors_warnings
+              if: ${{ !cancelled() }}
+              run: |
+                  : # If the ./dist/_ERRORS.txt file is not empty, then prepend it to the dashboard
+                  if [ -s ./dist/_ERRORS.txt ]; then
+                      touch ./dist/_ERRORS_HEADER.md
+                      printf '# Dashboard\n\n## Error During Build!\n\n!!! failure\n    There was an error during your build. Details are below:\n\n```\n' > ./dist/_ERRORS_HEADER.md
+                      printf '```\n' >> ./dist/_ERRORS.txt
+                      cat ./dist/_ERRORS_HEADER.md ./dist/_ERRORS.txt ./docs/dashboard.md > ./dist/tmp.md
+                      mv ./dist/tmp.md ./docs/dashboard.md
+                      printf 'Errors found during build. They were prepended to dashboard.\n' >> ./dist/_build_log.txt
+                  else
+                    : # If the ./dist/_WARNINGS.txt file is not empty, then prepend it to the dashboard
+                    if [ -s ./dist/_WARNINGS.txt ]; then
+                        touch ./dist/_WARNINGS_HEADER.md
+                        printf '# Dashboard\n\n## Warning During Build!\n\n!!! warning\n    There was one or more warnings during your build. Details are below:\n\n```\n' > ./dist/_WARNINGS_HEADER.md
+                        printf '```\n' >> ./dist/_WARNINGS.txt
+                        cat ./dist/_WARNINGS_HEADER.md ./dist/_WARNINGS.txt ./docs/dashboard.md > ./dist/tmp.md
+                        mv ./dist/tmp.md ./docs/dashboard.md
+                        printf 'Warnings found during build. They were prepended to dashboard.\n' >> ./dist/_build_log.txt
+                    else
+                        : # Need to prepend '# Dashboard' to the dashboard file if there are no errors or warnings
+                        printf '# Dashboard\n' > ./dist/tmp.md
+                        cat ./dist/tmp.md ./docs/dashboard.md > ./dist/tmp2.md
+                        mv ./dist/tmp2.md ./docs/dashboard.md
+                        printf 'No major errors or warnings found during build.\n' >> ./dist/_build_log.txt
+                    fi
+                  fi
+                  : # Scratch files that should not be deployed
+                  rm -f ./dist/tmp.md ./dist/tmp2.md ./dist/_ERRORS_HEADER.md ./dist/_WARNINGS_HEADER.md
+
+            # Add the build log to the end of the dashboard
+            - name: Add build log at the end of the dashboard
+              id: add_build_log
+              if: ${{ !cancelled() }}
+              run: |
+                  printf '\n## Build Log\n' >> ./docs/dashboard.md
+                  echo '```' >> ./docs/dashboard.md
+                  cat ./dist/_build_log.txt >> ./docs/dashboard.md
+                  echo '```' >> ./docs/dashboard.md
+                  printf 'Build log added to dashboard. Preparing to generate final HTML and deploy!' >> ./docs/dashboard.md
+
+            # Generate HTML from Markdown in Docs/
+            - name: Generate HTML from Markdown in Docs/
+              if: ${{ !cancelled() }}
+              id: markdown-docs
+              uses: ldeluigi/markdown-docs@v0.8.2
+              with:
+                  src: docs
+                  dst: dist/docs/
+
+            # Pages
+            - name: Setup Pages
+              if: ${{ !cancelled() }}
+              uses: actions/configure-pages@v5
+
+            - name: Upload artifact (for Pages)
+              if: ${{ !cancelled() }}
+              uses: actions/upload-pages-artifact@v4
+              with:
+                  path: "dist/"
+
+            - name: Deploy to GitHub Pages
+              if: ${{ !cancelled() }}
+              id: deployment
+              uses: actions/deploy-pages@v4
+
+            # The dashboard has been published either way; now make the run itself
+            # red if anything above failed, so the commit shows an X on GitHub.
+            - name: Report overall status
+              if: ${{ !cancelled() }}
+              run: |
+                  if [ -s ./dist/_ERRORS.txt ]; then
+                      echo "::error::The build had errors. See the dashboard: ${{ steps.deployment.outputs.page_url }}dashboard.html"
+                      cat ./dist/_ERRORS.txt
+                      exit 1
+                  fi
+                  echo "All steps succeeded. Dashboard: ${{ steps.deployment.outputs.page_url }}dashboard.html"

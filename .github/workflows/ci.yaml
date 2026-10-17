@@ -1,0 +1,41 @@
+# Runs on every pull request (and on pushes to branches other than main) so
+# that lint, build, and test problems are visible on the PR before it merges.
+# Deployment to GitHub Pages happens separately in deploy.yaml.
+
+name: CI
+
+on:
+    pull_request:
+    push:
+        branches-ignore: [main]
+    workflow_dispatch:
+
+permissions:
+    contents: read
+
+jobs:
+    check:
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v5
+
+            - name: Use Node.js 22
+              uses: actions/setup-node@v5
+              with:
+                  node-version: 22
+                  cache: "npm"
+
+            - name: Install
+              run: npm ci
+
+            - name: Lint (ESLint + Prettier)
+              run: npm run lint -- --max-warnings 0
+
+            - name: Build (TypeScript + Vite)
+              run: npm run build
+
+            - name: Test
+              run: npm run test:ci
