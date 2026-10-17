@@ -1,0 +1,56 @@
+{
+    "name": "final-project",
+    "private": true,
+    "version": "0.0.0",
+    "license": "MIT",
+    "type": "module",
+    "engines": {
+        "node": ">=22"
+    },
+    "scripts": {
+        "dev": "vite",
+        "build": "tsc -b && vite build",
+        "preview": "vite preview",
+        "lint": "eslint src tests",
+        "lint:fix": "eslint --fix src tests",
+        "eslint-output": "eslint-output src tests --max-warnings 0",
+        "format": "prettier --write .",
+        "format:check": "prettier --check .",
+        "test": "jest --watch --config=jest.config.js",
+        "test:ci": "jest --ci --config=jest.config.js",
+        "test:cov": "jest --ci --coverage --config=jest.config.js"
+    },
+    "devDependencies": {
+        "@eslint/js": "^10.0.1",
+        "@swc/core": "^1.16.13",
+        "@swc/jest": "^0.2.39",
+        "@testing-library/dom": "^10.4.2",
+        "@testing-library/jest-dom": "^7.0.1",
+        "@testing-library/react": "^16.3.3",
+        "@testing-library/user-event": "^14.6.7",
+        "@types/jest": "^30.0.0",
+        "@types/node": "^26.6.4",
+        "@types/react": "^19.3.0",
+        "@types/react-dom": "^19.3.0",
+        "@vitejs/plugin-react": "^5.2.0",
+        "eslint": "^10.12.0",
+        "eslint-config-prettier": "^10.1.8",
+        "eslint-output": "^4.1.0",
+        "eslint-plugin-prettier": "^5.5.6",
+        "eslint-plugin-react-hooks": "^7.1.1",
+        "eslint-plugin-react-refresh": "^0.5.7",
+        "globals": "^17.13.0",
+        "identity-obj-proxy": "^3.0.0",
+        "jest": "^30.5.2",
+        "jest-environment-jsdom": "^30.5.2",
+        "jest-transform-stub": "^2.0.0",
+        "prettier": "^3.9.9",
+        "typescript": "~5.9.3",
+        "typescript-eslint": "^8.71.1",
+        "vite": "^7.3.7"
+    },
+    "dependencies": {
+        "react": "^19.3.0",
+        "react-dom": "^19.3.0"
+    }
+}

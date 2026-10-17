@@ -1,0 +1,18 @@
+# Normalize line endings: every text file is stored and checked out with LF,
+# regardless of the developer's core.autocrlf setting. This keeps Prettier and
+# ESLint output identical on Windows, macOS, and Linux.
+* text=auto eol=lf
+
+# Binary assets are left untouched.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.mp3 binary
+*.mp4 binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.zip binary
